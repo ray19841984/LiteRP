@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiteRP v0.10.1</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exifreader@4.12.0/dist/exif-reader.min.js"></script>
+    <style>
+        body { background-color: #0f0f0f; color: #e0e0e0; font-family: 'Inter', sans-serif; overflow: hidden; }
+        .chat-container { height: calc(100vh - 160px); overflow-y: auto; scroll-behavior: smooth; }
+        .user-msg { background: #2a2a2a; border-radius: 15px 15px 0 15px; border: 1px solid #3a3a3a; }
+        .ai-msg { background: #151515; border-radius: 15px 15px 15px 0; border: 1px solid #222; }
+        .sys-msg { background: #1a1a00; color: #b3b300; border-radius: 8px; text-align: center; border: 1px solid #333300; font-size: 0.8rem; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+        #leftSidebar, #rightSidebar { transition: transform 0.3s ease-in-out; }
+        @media (max-width: 1024px) {
+            #leftSidebar { transform: translateX(-100%); position: absolute; z-index: 40; }
+            #leftSidebar.open { transform: translateX(0); }
+            #rightSidebar { transform: translateX(100%); position: absolute; right: 0; z-index: 40; }
+            #rightSidebar.open { transform: translateX(0); }
+        }
+        .tab-btn { padding: 8px 12px; font-size: 0.85rem; color: #888; border-bottom: 2px solid transparent; transition: all 0.2s; cursor: pointer; flex: 1; text-align: center; }
+        .tab-btn.active { color: #60a5fa; border-bottom: 2px solid #60a5fa; font-weight: bold; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body class="flex h-screen w-full relative">
+
+    <!-- 📚 左側邊欄：章節與存檔 -->
+    <div id="leftSidebar" class="w-64 h-full bg-[#0a0a0a] border-r border-white/10 flex flex-col shadow-2xl flex-shrink-0">
+        <div class="p-4 border-b border-white/10 flex justify-between items-center bg-[#121212]">
+            <h2 class="font-bold text-base text-gray-200">📚 劇本與歷史</h2>
+            <button onclick="toggleLeft()" class="lg:hidden text-gray-400">✖</button>
+        </div>
+        <div class="p-4 border-b border-white/10 space-y-2">
+            <button onclick="newStory()" class="w-full bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-500/30 py-2 rounded-lg text-sm transition font-bold">➕ 新建劇本 (全清空)</button>
+            <button onclick="nextChapter()" class="w-full bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 border border-blue-500/30 py-2 rounded-lg text-sm transition font-bold">⏭️ 進入下一章</button>
+            <button onclick="uploadSaveGame(false)" id="btnManualSave" class="w-full bg-green-900/30 hover:bg-green-900/50 text-green-400 border border-green-500/30 py-2 rounded-lg text-sm transition">💾 儲存里程碑</button>
+        </div>
+        <div class="p-2 flex justify-between items-center bg-[#121212] border-b border-white/10">
+            <span class="text-xs text-gray-400 font-bold ml-2">雲端存檔清單</span>
+            <button onclick="fetchSaveList()" class="text-xs bg-gray-800 hover:bg-gray-700 text-white px-2 py-1 rounded">🔄 整理</button>
+        </div>
+        <div id="saveList" class="flex-1 overflow-y-auto p-2 space-y-1 text-xs text-gray-400 text-center pt-4">
+            點擊「整理」以載入進度
+        </div>
+    </div>
+
+    <!-- 🌟 中間主要對話區 -->
+    <div class="flex-1 flex flex-col h-full relative min-w-0">
+        <div class="h-16 border-b border-white/10 flex items-center justify-between px-4 bg-[#121212]/80 backdrop-blur-md z-10">
+            <div class="flex items-center gap-3">
+                <button onclick="toggleLeft()" class="lg:hidden text-gray-400 hover:text-white p-2 bg-white/5 rounded-lg border border-white/10">📚</button>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tighter">LiteRP <span class="text-xs text-gray-500 font-normal">v0.10.1</span></h1>
+                    <p id="connStatus" class="text-[10px] text-green-500">● 準備連線</p>
+                </div>
+            </div>
+            <div class="flex gap-2 items-center">
+                <span id="autoSaveMsg" class="text-[10px] text-gray-500 hidden mr-2">已本機秒存</span>
+                <button onclick="openSettingsModal()" class="bg-white/5 hover:bg-white/10 text-gray-300 px-3 py-1.5 rounded-lg text-sm transition border border-white/10">⚙️ 系統設定</button>
+                <button onclick="toggleRight()" class="lg:hidden text-gray-400 hover:text-white p-2 bg-white/5 rounded-lg border border-white/10">🎭</button>
+            </div>
+        </div>
+
+        <div id="chatBox" class="chat-container p-4 md:p-8">
+            <div class="sys-msg p-3 mb-4 mx-auto w-fit">歡迎使用 v0.10.1！已修復雲端清單更新、AutoSave 覆寫與模型抓取提示功能。</div>
+        </div>
+
+        <div class="p-4 bg-[#0a0a0a] border-t border-white/10">
+            <div class="max-w-4xl mx-auto relative">
+                <textarea id="userInput" rows="1" 
+                    class="w-full bg-[#1a1a1a] border border-white/10 rounded-xl p-4 pr-16 focus:outline-none focus:border-blue-500 transition resize-none text-gray-200"
+                    placeholder="輸入對話... (Enter 發送，Shift+Enter 換行)"></textarea>
+                <button id="sendBtn" onclick="sendMessage()" class="absolute right-3 bottom-3 p-2 text-blue-500 hover:text-blue-400 transition bg-blue-500/10 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🎭 右側邊欄：記憶與角色 (三頁籤) -->
+    <div id="rightSidebar" class="w-80 h-full bg-[#121212] border-l border-white/10 flex flex-col shadow-2xl flex-shrink-0">
+        <div class="p-4 border-b border-white/10 flex justify-between items-center bg-[#0a0a0a]">
+            <h2 class="font-bold text-base text-blue-400">🎭 記憶面板</h2>
+            <button onclick="toggleRight()" class="lg:hidden text-gray-400">✖</button>
+        </div>
+        
+        <div class="flex border-b border-white/10 bg-[#0a0a0a]">
+            <div class="tab-btn active" onclick="switchTab('tab-char')">👤 主角陣容</div>
+            <div class="tab-btn" onclick="switchTab('tab-summary')">📝 總結</div>
+            <div class="tab-btn" onclick="switchTab('tab-lore')">📖 世界書</div>
+        </div>
+        
+        <div class="p-4 flex-1 overflow-y-auto">
+            <div id="tab-char" class="tab-content active">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-sm text-gray-400 font-bold">常駐角色列表</h3>
+                    <label class="cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded text-xs transition">
+                        ➕ 匯入 PNG
+                        <input type="file" id="charInput" class="hidden" accept="image/png">
+                    </label>
+                </div>
+                <div id="rosterContainer" class="space-y-3 mb-4"></div>
+                <p class="text-xs text-gray-500 mt-2">提示：匯入多個角色時，AI 會自動切換為「群聊模式」進行扮演。</p>
+            </div>
+
+            <div id="tab-summary" class="tab-content">
+                <div class="flex justify-between items-end mb-2">
+                    <h3 class="text-sm text-gray-400 font-bold">動態記憶 (前情提要)</h3>
+                    <button onclick="bgAutoSummarize()" id="btnSummarize" class="bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 px-2 py-1 rounded text-xs transition border border-blue-500/30">✨ 啟動 AI 濃縮</button>
+                </div>
+                <textarea id="storySummary" rows="15" placeholder="AI 濃縮的劇情會在這裡..." class="w-full bg-[#1a1a1a] border border-gray-700 rounded-lg p-2 text-sm text-white focus:border-blue-500 outline-none resize-none" onchange="autoSaveLocal()"></textarea>
+            </div>
+
+            <div id="tab-lore" class="tab-content">
+                <h3 class="text-sm text-gray-400 font-bold mb-2">動態配角與設定 (Lorebook)</h3>
+                <textarea id="lorebook" rows="15" placeholder="格式範例：\n老王: 鐵匠鋪老闆。\n傳說之劍: 放在祭壇上的生鏽鐵劍。" class="w-full bg-[#1a1a1a] border border-gray-700 rounded-lg p-2 text-sm text-white focus:border-blue-500 outline-none resize-none leading-relaxed" onchange="autoSaveLocal()"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⚙️ 系統設定面板 -->
+    <div id="settingsModal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+        <div class="bg-[#121212] border border-white/10 rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6"><h2 class="text-xl font-bold text-white">⚙️ 系統與網路設定</h2><button onclick="closeSettingsModal()" class="text-gray-400 hover:text-white">✖</button></div>
+            
+            <div class="mb-6 p-4 bg-white/5 rounded-xl border border-white/5">
+                <h3 class="text-sm font-semibold text-blue-400 mb-3">伺服器與模型選擇 (LM Studio API)</h3>
+                <div class="flex gap-2 mb-2"><select id="serverSelect" class="flex-1 bg-[#0a0a0a] border border-gray-700 rounded-lg p-2 text-sm text-gray-200 outline-none"></select><button onclick="deleteServer()" class="bg-red-900/50 text-red-300 px-3 rounded-lg text-xs">刪除</button></div>
+                <div class="flex gap-2 mb-4"><input type="text" id="newServerInput" class="flex-1 bg-[#0a0a0a] border border-gray-700 rounded-lg p-2 text-sm text-gray-200" placeholder="https://....ts.net:8443/v1"><button onclick="addServer()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">新增</button></div>
+                <div class="border-t border-gray-700 pt-3">
+                    <div class="flex gap-2"><select id="modelSelect" class="flex-1 bg-[#0a0a0a] border border-gray-700 rounded-lg p-2 text-sm text-gray-200"></select><button onclick="fetchModels()" id="fetchModelsBtn" class="bg-gray-700 text-white px-3 py-2 rounded-lg text-xs">抓取清單</button></div>
+                    <!-- 補回並強化：模型抓取狀態訊息 -->
+                    <p id="modelStatusMsg" class="text-xs mt-2"></p>
+                    <p class="text-xs text-gray-500 mt-1">提示：選擇並儲存後，下次會自動記憶您選用的模型。</p>
+                </div>
+            </div>
+            
+            <div class="mb-6 p-4 bg-white/5 rounded-xl border border-white/5"><h3 class="text-sm font-semibold text-blue-400 mb-3">GitHub 雲端存檔設定</h3><div class="mb-3"><label class="block text-xs font-bold mb-1 text-gray-400">GitHub Token</label><input type="password" id="cfgGhToken" class="w-full bg-[#0a0a0a] border border-gray-700 rounded-lg p-2 text-sm text-white"></div><div class="flex gap-2 mb-3"><div class="flex-1"><label class="block text-xs font-bold mb-1 text-gray-400">GitHub User</label><input type="text" id="cfgGhUser" class="w-full bg-[#0a0a0a] border border-gray-700 rounded-lg p-2 text-sm text-white"></div><div class="flex-1"><label class="block text-xs font-bold mb-1 text-gray-400">GitHub Repo</label><input type="text" id="cfgGhRepo" class="w-full bg-[#0a0a0a] border border-gray-700 rounded-lg p-2 text-sm text-white"></div></div><div><label class="block text-xs font-bold mb-1 text-green-400">存檔加密金鑰 (AES)</label><input type="password" id="cfgAesKey" class="w-full bg-[#0a0a0a] border border-gray-700 rounded-lg p-2 text-sm text-white"></div></div>
+            
+            <div class="flex justify-between border-t border-gray-800 pt-4"><div class="flex gap-2"><button onclick="exportSysConfig()" class="px-3 py-1.5 rounded-lg text-xs bg-gray-800 text-gray-300 border border-gray-700">💾 匯出</button><label class="cursor-pointer px-3 py-1.5 rounded-lg text-xs bg-gray-800 text-gray-300 border border-gray-700">📂 匯入<input type="file" id="importSysFile" class="hidden" accept=".json"></label></div><div class="flex gap-2"><button onclick="closeSettingsModal()" class="px-4 py-2 rounded-lg text-sm bg-gray-800 text-white">取消</button><button onclick="saveSysConfig()" class="px-5 py-2 rounded-lg text-sm bg-blue-600 text-white font-bold">儲存並套用</button></div></div>
+        </div>
+    </div>
+
+    <script>
+        // --- 核心狀態 ---
+        let rpState = { history: [], roster: [], summary: "", lore: "", msgCountSinceSave: 0 };
+        let sysConfig = { servers: ["http://localhost:1234/v1"], currentServer: "http://localhost:1234/v1", currentModel: "local-model", ghToken: "", ghUser: "", ghRepo: "", aesKey: "" };
+
+        window.onload = () => {
+            const savedSys = localStorage.getItem('liteRPSysConfig');
+            if (savedSys) {
+                let parsed = JSON.parse(savedSys);
+                if(parsed.apiUrl && !parsed.servers) { parsed.servers = [parsed.apiUrl]; parsed.currentServer = parsed.apiUrl; parsed.currentModel = "local-model"; }
+                sysConfig = { ...sysConfig, ...parsed };
+                updateConfigUI(); updateServerUI(); updateConnStatus();
+            }
+            const savedState = localStorage.getItem('liteRPLocalState');
+            if (savedState) {
+                const parsedState = JSON.parse(savedState);
+                rpState.history = parsedState.history || [];
+                rpState.roster = parsedState.roster || [];
+                if(parsedState.cName && rpState.roster.length === 0) { rpState.roster.push({ id: Date.now(), name: parsedState.cName, persona: parsedState.cPersona }); }
+                document.getElementById('storySummary').value = parsedState.summary || "";
+                document.getElementById('lorebook').value = parsedState.lore || "";
+                renderRosterUI();
+                rpState.history.forEach(msg => appendMessage(msg.role === 'assistant' ? 'ai' : 'user', msg.content));
+            }
+        };
+
+        function autoSaveLocal() {
+            rpState.summary = document.getElementById('storySummary').value; rpState.lore = document.getElementById('lorebook').value;
+            localStorage.setItem('liteRPLocalState', JSON.stringify(rpState));
+            const msg = document.getElementById('autoSaveMsg'); msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 2000);
+        }
+
+        // --- 劇本管理 ---
+        function newStory() {
+            if(!confirm("⚠️ 確定建立新劇本嗎？目前的對話與所有角色記憶將被完全清空！")) return;
+            rpState.history = []; rpState.roster = []; document.getElementById('storySummary').value = ""; document.getElementById('lorebook').value = "";
+            document.getElementById('chatBox').innerHTML = '<div class="sys-msg p-3 mb-4 mx-auto w-fit">已建立全新劇本。請匯入角色開始故事！</div>';
+            renderRosterUI(); autoSaveLocal();
+        }
+        function nextChapter() {
+            if(!confirm("⏭️ 確定進入下一章？對話將被清空，但【角色】與【總結】會保留。")) return;
+            rpState.history = []; document.getElementById('chatBox').innerHTML = '<div class="sys-msg p-3 mb-4 mx-auto w-fit">已進入新的一章。您可以直接輸入對話延續劇情。</div>';
+            autoSaveLocal();
+        }
+
+        // --- 陣容管理 ---
+        function renderRosterUI() {
+            const container = document.getElementById('rosterContainer'); container.innerHTML = '';
+            if(rpState.roster.length === 0) { container.innerHTML = '<div class="text-xs text-gray-500 text-center p-4 border border-dashed border-gray-700 rounded-lg">陣容目前空無一人，請匯入角色卡。</div>'; return; }
+            rpState.roster.forEach(char => {
+                const charDiv = document.createElement('div'); charDiv.className = "bg-[#1a1a1a] border border-gray-700 rounded-lg p-3 relative group";
+                charDiv.innerHTML = `<div class="flex justify-between items-center mb-2"><span class="font-bold text-sm text-green-400">👑 ${char.name}</span><button onclick="removeChar(${char.id})" class="text-xs text-red-500 hover:text-red-400 bg-red-900/20 px-2 py-1 rounded">刪除</button></div><textarea id="persona_${char.id}" rows="3" class="w-full bg-[#0a0a0a] border border-gray-800 rounded p-2 text-xs text-gray-300 outline-none resize-none" onchange="updateChar(${char.id})">${char.persona}</textarea>`;
+                container.appendChild(charDiv);
+            });
+        }
+        function updateChar(id) { const char = rpState.roster.find(c => c.id === id); if(char) { char.persona = document.getElementById(`persona_${id}`).value; autoSaveLocal(); } }
+        function removeChar(id) { if(!confirm("確定退出陣容嗎？")) return; rpState.roster = rpState.roster.filter(c => c.id !== id); renderRosterUI(); autoSaveLocal(); }
+
+        document.getElementById('charInput').addEventListener('change', async (e) => {
+            const file = e.target.files[0]; if (!file) return;
+            try {
+                const tags = await ExifReader.load(file);
+                if (tags.chara) {
+                    const decoded = decodeURIComponent(escape(window.atob(tags.chara.description)));
+                    const charData = JSON.parse(decoded);
+                    const newChar = { id: Date.now(), name: charData.name || "未知角色", persona: `[描述]:\n${charData.description || ""}\n[性格]:\n${charData.personality || ""}` };
+                    rpState.roster.push(newChar); renderRosterUI();
+                    if (charData.first_mes && rpState.history.length === 0) { appendMessage('ai', charData.first_mes, newChar.name); rpState.history.push({ role: "assistant", content: charData.first_mes }); }
+                    autoSaveLocal();
+                } else { alert("找不到角色設定！"); }
+            } catch (err) { alert("無法解析卡片！"); }
+            e.target.value = ''; 
+        });
+
+        // --- UI & 設定 ---
+        function toggleLeft() { document.getElementById('leftSidebar').classList.toggle('open'); }
+        function toggleRight() { document.getElementById('rightSidebar').classList.toggle('open'); }
+        function switchTab(tabId) { document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active')); document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active')); event.target.classList.add('active'); document.getElementById(tabId).classList.add('active'); }
+        function openSettingsModal() { document.getElementById('settingsModal').classList.remove('hidden'); }
+        function closeSettingsModal() { document.getElementById('settingsModal').classList.add('hidden'); }
+
+        function updateConfigUI() { document.getElementById('cfgGhToken').value = sysConfig.ghToken; document.getElementById('cfgGhUser').value = sysConfig.ghUser; document.getElementById('cfgGhRepo').value = sysConfig.ghRepo; document.getElementById('cfgAesKey').value = sysConfig.aesKey; }
+        function updateServerUI() { const sel = document.getElementById('serverSelect'); sel.innerHTML=''; sysConfig.servers.forEach(url=>{let opt=document.createElement('option'); opt.value=opt.text=url; if(url===sysConfig.currentServer)opt.selected=true; sel.appendChild(opt);}); document.getElementById('modelSelect').innerHTML=`<option value="${sysConfig.currentModel}">${sysConfig.currentModel}</option>`;}
+        function addServer() { let url = document.getElementById('newServerInput').value.trim(); if(url && !sysConfig.servers.includes(url)){ if(!url.endsWith('/v1'))url+='/v1'; sysConfig.servers.push(url); sysConfig.currentServer=url; updateServerUI(); document.getElementById('newServerInput').value=''; } }
+        function deleteServer() { let url = document.getElementById('serverSelect').value; if(sysConfig.servers.length>1){ sysConfig.servers = sysConfig.servers.filter(s=>s!==url); sysConfig.currentServer=sysConfig.servers[0]; updateServerUI(); } else alert("至少保留一個!"); }
+        function saveSysConfig() { sysConfig.currentServer=document.getElementById('serverSelect').value; sysConfig.currentModel=document.getElementById('modelSelect').value; sysConfig.ghToken=document.getElementById('cfgGhToken').value.trim(); sysConfig.ghUser=document.getElementById('cfgGhUser').value.trim(); sysConfig.ghRepo=document.getElementById('cfgGhRepo').value.trim(); sysConfig.aesKey=document.getElementById('cfgAesKey').value.trim(); localStorage.setItem('liteRPSysConfig', JSON.stringify(sysConfig)); updateConnStatus(); closeSettingsModal(); }
+        function updateConnStatus() { document.getElementById('connStatus').innerText = `● 連線: ${sysConfig.currentServer.replace('https://','').replace('/v1','')} | ${sysConfig.currentModel}`; }
+        function exportSysConfig() { sysConfig.currentServer = document.getElementById('serverSelect').value; sysConfig.currentModel = document.getElementById('modelSelect').value; sysConfig.ghToken = document.getElementById('cfgGhToken').value.trim(); sysConfig.ghUser = document.getElementById('cfgGhUser').value.trim(); sysConfig.ghRepo = document.getElementById('cfgGhRepo').value.trim(); sysConfig.aesKey = document.getElementById('cfgAesKey').value.trim(); const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(sysConfig, null, 2)); const dl = document.createElement('a'); dl.setAttribute("href", dataStr); dl.setAttribute("download", "literp_sys_config.json"); dl.click(); }
+        document.getElementById('importSysFile').addEventListener('change', (e) => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (event) => { try { sysConfig = { ...sysConfig, ...JSON.parse(event.target.result) }; localStorage.setItem('liteRPSysConfig', JSON.stringify(sysConfig)); updateConfigUI(); updateServerUI(); updateConnStatus(); alert("✅ 匯入成功！"); } catch(err) { alert("❌ 設定檔錯誤！"); } }; reader.readAsText(file); e.target.value = ''; });
+
+        // --- 修復 3：強化抓取模型回饋 ---
+        async function fetchModels() {
+            const serverUrl = document.getElementById('serverSelect').value;
+            const select = document.getElementById('modelSelect');
+            const msg = document.getElementById('modelStatusMsg');
+            const btn = document.getElementById('fetchModelsBtn');
+            btn.innerText = "⏳ 抓取中";
+            msg.innerText = "連線中，請稍候...";
+            msg.className = "text-xs text-yellow-500 mt-2 font-bold";
+            try {
+                const res = await fetch(`${serverUrl}/models`);
+                if(!res.ok) throw new Error();
+                const data = await res.json();
+                select.innerHTML = '';
+                if(data.data && data.data.length > 0) {
+                    data.data.forEach(m => { let opt = document.createElement('option'); opt.value = opt.text = m.id; select.appendChild(opt); });
+                    if(Array.from(select.options).some(o => o.value === sysConfig.currentModel)) { select.value = sysConfig.currentModel; }
+                    msg.innerText = "✅ 成功抓取模型！請記得按下方『儲存並套用』。";
+                    msg.className = "text-xs text-green-500 mt-2 font-bold";
+                } else {
+                    select.innerHTML = '<option value="local-model">無模型</option>';
+                    msg.innerText = "⚠️ 伺服器有回應，但找不到模型。";
+                    msg.className = "text-xs text-yellow-500 mt-2 font-bold";
+                }
+            } catch (err) {
+                msg.innerText = "❌ 無法連線，請檢查 Tailscale HTTPS 或 CORS 設定。";
+                msg.className = "text-xs text-red-500 mt-2 font-bold";
+            } finally { btn.innerText = "抓取清單"; }
+        }
+
+        // --- 聊天與 Prompt ---
+        function parseLorebook(userInput) {
+            const loreText = document.getElementById('lorebook').value; if(!loreText.trim()) return "";
+            let triggeredLores = [];
+            loreText.split('\n').forEach(line => {
+                const parts = line.split(':');
+                if(parts.length >= 2) {
+                    const keyword = parts[0].trim(); const detail = parts.slice(1).join(':').trim();
+                    if(keyword && userInput.includes(keyword)) { triggeredLores.push(`[動態配角/設定 - ${keyword}]: ${detail}`); }
+                }
+            });
+            return triggeredLores.length > 0 ? "\n\n【當下環境補充資訊】：\n" + triggeredLores.join("\n") : "";
+        }
+
+        document.getElementById('userInput').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
+
+        async function sendMessage() {
+            const input = document.getElementById('userInput'); const text = input.value.trim(); if (!text) return;
+            if(rpState.roster.length === 0) { alert("請先匯入至少一位主角！"); return; }
+            appendMessage('user', text); rpState.history.push({ role: "user", content: text }); input.value = '';
+
+            let dynamicPrompt = `你現在負責處理一個角色扮演劇本。請完全沉浸在劇情中，用語氣和動作(用括號表示)推動故事，不要承認自己是AI。\n\n【當前出場的主角陣容】：\n`;
+            rpState.roster.forEach(char => { dynamicPrompt += `--- [${char.name}] ---\n${char.persona}\n\n`; });
+            const summary = document.getElementById('storySummary').value;
+            if(summary) dynamicPrompt += `【前情提要與當前狀態】：\n${summary}\n`;
+            dynamicPrompt += parseLorebook(text);
+
+            const aiMsgDiv = appendMessage('ai', '...', rpState.roster.length === 1 ? rpState.roster[0].name : 'AI 導演');
+            try {
+                if(!sysConfig.currentServer) throw new Error("尚未設定 LM Studio API");
+                const fetchUrl = sysConfig.currentServer.endsWith('/v1') ? `${sysConfig.currentServer}/chat/completions` : sysConfig.currentServer;
+                const response = await fetch(fetchUrl, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model: sysConfig.currentModel || "local-model", messages: [ { role: "system", content: dynamicPrompt }, ...rpState.history ], temperature: 0.8 })
+                });
+                if (!response.ok) throw new Error("API 連線失敗");
+                const data = await response.json(); const reply = data.choices[0].message.content;
+                aiMsgDiv.innerHTML = `<div class="text-xs font-bold mb-1 text-green-400">劇情回應</div><div>${reply.replace(/\n/g, '<br>')}</div>`;
+                rpState.history.push({ role: "assistant", content: reply });
+                autoSaveLocal();
+                rpState.msgCountSinceSave++;
+                if(rpState.msgCountSinceSave >= 5) { uploadSaveGame(true); rpState.msgCountSinceSave = 0; }
+            } catch (err) { aiMsgDiv.innerText = `[系統警告] ${err.message}`; }
+        }
+
+        async function bgAutoSummarize() {
+            const btn = document.getElementById('btnSummarize'); const summaryBox = document.getElementById('storySummary');
+            btn.innerText = "⏳ 濃縮中...";
+            const recentChat = rpState.history.slice(-20).map(m => `${m.role === 'user' ? '玩家' : 'AI'}: ${m.content}`).join('\n');
+            const oldSummary = summaryBox.value;
+            const prompt = `請將以下【舊的劇情摘要】與【最新對話】完美融合，寫出一份不超過 500 字的最新劇情摘要。必須包含主要角色的心理狀態、位置與發展方向。\n\n【舊摘要】:\n${oldSummary}\n\n【最新對話】:\n${recentChat}`;
+            try {
+                const fetchUrl = sysConfig.currentServer.endsWith('/v1') ? `${sysConfig.currentServer}/chat/completions` : sysConfig.currentServer;
+                const response = await fetch(fetchUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: sysConfig.currentModel || "local-model", messages: [ { role: "user", content: prompt } ], temperature: 0.5 }) });
+                if (!response.ok) throw new Error("API 失敗");
+                const data = await response.json(); summaryBox.value = data.choices[0].message.content; autoSaveLocal(); 
+                btn.innerText = "✅ 完成更新"; setTimeout(() => btn.innerText = "✨ 啟動 AI 濃縮", 3000);
+            } catch (err) { alert("總結失敗: " + err.message); btn.innerText = "✨ 啟動 AI 濃縮"; }
+        }
+
+        function appendMessage(role, text, nameOverride) {
+            const chatBox = document.getElementById('chatBox'); const div = document.createElement('div');
+            const displayName = role === 'user' ? '你' : (nameOverride || '劇情回應');
+            div.className = `p-4 mb-4 text-sm w-fit max-w-[85%] ${role === 'user' ? 'user-msg ml-auto' : 'ai-msg mr-auto'}`;
+            div.innerHTML = `<div class="text-xs font-bold mb-1 ${role === 'user' ? 'text-blue-400' : 'text-green-400'}">${displayName}</div><div>${text.replace(/\n/g, '<br>')}</div>`;
+            chatBox.appendChild(div); chatBox.scrollTop = chatBox.scrollHeight; return div.lastElementChild;
+        }
+
+        // --- 加密與存檔 ---
+        function utf8ToBase64(str) { const bytes=new TextEncoder().encode(str); let b=''; for(let i=0;i<bytes.byteLength;i++)b+=String.fromCharCode(bytes[i]); return btoa(b); }
+        function base64ToUtf8(b64) { const bin=atob(b64); const bytes=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i); return new TextDecoder().decode(bytes); }
+
+        async function enforceSaveLimit(files) {
+            let manualSaves = files.filter(f => f.name.startsWith('LiteRP_') && f.name.endsWith('.json') && !f.name.includes('AutoSave'));
+            manualSaves.sort((a, b) => a.name.localeCompare(b.name));
+            while(manualSaves.length > 20) {
+                const oldest = manualSaves.shift();
+                try { await fetch(`https://api.github.com/repos/${sysConfig.ghUser}/${sysConfig.ghRepo}/contents/${oldest.name}?t=${Date.now()}`, { method: 'DELETE', headers: { 'Authorization': `token ${sysConfig.ghToken}`, 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }, body: JSON.stringify({ message: "Auto-delete old save", sha: oldest.sha }) }); } catch(e) {}
+            }
+        }
+
+        // --- 修復 1 & 2：加入 ?t=${Date.now()} 破解 GitHub 快取 ---
+        async function uploadSaveGame(isAutoSave = false) {
+            if(!sysConfig.ghToken || !sysConfig.aesKey) return;
+            const btn = document.getElementById('btnManualSave'); if(!isAutoSave) btn.innerText = "⏳ 上傳中...";
+            const fullSave = { roster: rpState.roster, summary: document.getElementById('storySummary').value, lore: document.getElementById('lorebook').value, history: rpState.history };
+            const jsonStr = JSON.stringify(fullSave); const b64Content = utf8ToBase64(CryptoJS.AES.encrypt(jsonStr, sysConfig.aesKey).toString());
+
+            let filename = "LiteRP_AutoSave.json";
+            if(!isAutoSave) { const now = new Date(); filename = `LiteRP_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}.json`; }
+
+            try {
+                // 強迫抓取最新清單，破解快取
+                const listRes = await fetch(`https://api.github.com/repos/${sysConfig.ghUser}/${sysConfig.ghRepo}/contents?t=${Date.now()}`, { headers: { 'Authorization': `token ${sysConfig.ghToken}`, 'Cache-Control': 'no-cache' } });
+                if(listRes.ok) {
+                    const files = await listRes.json();
+                    if(!isAutoSave) await enforceSaveLimit(files);
+                    const existing = files.find(f => f.name === filename);
+                    const bodyData = { message: `LiteRP Save ${filename}`, content: b64Content };
+                    if(existing) bodyData.sha = existing.sha; // 取得正確的 SHA 才能成功覆寫 AutoSave
+
+                    const res = await fetch(`https://api.github.com/repos/${sysConfig.ghUser}/${sysConfig.ghRepo}/contents/${filename}`, {
+                        method: 'PUT', headers: { 'Authorization': `token ${sysConfig.ghToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(bodyData)
+                    });
+                    if (!isAutoSave) { if (res.ok) alert(`✅ 存檔成功！\n檔名: ${filename}`); else alert("❌ 上傳失敗。"); }
+                }
+            } catch(e) { if(!isAutoSave) alert("發生錯誤: " + e.message); }
+            finally { if(!isAutoSave) { btn.innerText = "💾 儲存里程碑"; fetchSaveList(); } }
+        }
+
+        async function fetchSaveList() {
+            if(!sysConfig.ghToken) return;
+            const listDiv = document.getElementById('saveList'); listDiv.innerHTML = "⏳ 讀取中...";
+            try {
+                // 強迫抓取最新清單，破解快取
+                const res = await fetch(`https://api.github.com/repos/${sysConfig.ghUser}/${sysConfig.ghRepo}/contents?t=${Date.now()}`, { headers: { 'Authorization': `token ${sysConfig.ghToken}`, 'Cache-Control': 'no-cache' } });
+                const files = (await res.json()).filter(f => f.name.startsWith('LiteRP_') && f.name.endsWith('.json')).reverse();
+                listDiv.innerHTML = '';
+                if(files.length === 0) { listDiv.innerHTML = "無雲端紀錄"; return; }
+                files.forEach(file => {
+                    const isAuto = file.name === "LiteRP_AutoSave.json"; const item = document.createElement('div');
+                    item.className = "flex justify-between items-center p-2 mb-1 bg-[#1a1a1a] rounded-lg border border-gray-700 hover:border-blue-500 cursor-pointer";
+                    const displayName = file.name.replace('LiteRP_', '').replace('.json', '');
+                    item.innerHTML = `<span class="text-blue-300 font-mono truncate" style="max-width:140px;" title="${file.name}">${isAuto ? '🔄 AutoSave' : '📄 '+displayName}</span> <button class="text-[10px] bg-blue-600 px-2 py-1 rounded text-white font-bold">載入</button>`;
+                    item.onclick = () => loadSaveGame(file.name); listDiv.appendChild(item);
+                });
+            } catch(e) { listDiv.innerHTML = `<span class="text-red-500">讀取失敗</span>`; }
+        }
+
+        async function loadSaveGame(filename) {
+            if(!sysConfig.aesKey) return alert("請先在設定中輸入 AES 密碼！");
+            if(!confirm(`確定要載入 ${filename} 嗎？目前的對話將被覆蓋。`)) return;
+            try {
+                // 讀檔時也加上快取破解，確保抓到最新存檔
+                const res = await fetch(`https://api.github.com/repos/${sysConfig.ghUser}/${sysConfig.ghRepo}/contents/${filename}?t=${Date.now()}`, { headers: { 'Authorization': `token ${sysConfig.ghToken}`, 'Cache-Control': 'no-cache' } });
+                const data = await res.json();
+                const decryptedStr = CryptoJS.AES.decrypt(base64ToUtf8(data.content.replace(/\n/g, '')), sysConfig.aesKey).toString(CryptoJS.enc.Utf8);
+                if(!decryptedStr) throw new Error("密碼錯誤！");
+                
+                const saveGame = JSON.parse(decryptedStr); rpState.history = saveGame.history; rpState.roster = saveGame.roster || [];
+                if(saveGame.character && rpState.roster.length === 0) { rpState.roster.push({ id: Date.now(), name: saveGame.character.name, persona: saveGame.character.persona }); }
+                document.getElementById('storySummary').value = saveGame.summary || ""; if(saveGame.lore !== undefined) document.getElementById('lorebook').value = saveGame.lore;
+                
+                renderRosterUI(); document.getElementById('chatBox').innerHTML = ''; rpState.history.forEach(msg => appendMessage(msg.role === 'assistant' ? 'ai' : 'user', msg.content));
+                autoSaveLocal(); alert("📂 載入成功！");
+            } catch(e) { alert("讀取失敗: " + e.message); }
+        }
+    </script>
+</body>
+</html>
