@@ -444,7 +444,7 @@
             }
             dynamicPrompt += parseLorebook(lastUserText);
 
-            const recentHistory = rpState.history.slice(-30).map(m => ({ role: m.role, content: m.content }));
+            const recentHistory = rpState.history.slice(-10).map(m => ({ role: m.role, content: m.content }));
             
             const aiId = generateUniqueId();
             const finalName = rpState.roster.length === 1 ? rpState.roster[0].name : '劇情回應';
