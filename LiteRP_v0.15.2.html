@@ -390,7 +390,12 @@
             const fullSave = { roster: rpState.roster, summary: document.getElementById('storySummary').value, pinnedMemo: document.getElementById('pinnedMemo').value, lore: document.getElementById('lorebook').value, history: rpState.history };
             const jsonStr = JSON.stringify(fullSave); 
             const b64Content = utf8ToBase64(CryptoJS.AES.encrypt(jsonStr, sysConfig.aesKey).toString());
-            let filename = isAutoSave ? "LiteRP_AutoSave.json" : `LiteRP_${new Date().toISOString().replace(/[-:T]/g,'').substring(0,14)}.json`;
+            // 取得符合台灣時區 (GMT+8) 的本地時間字串
+            const now = new Date();
+            const pad = (n) => String(n).padStart(2, '0');
+            const localTimeStr = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+            
+            let filename = isAutoSave ? "LiteRP_AutoSave.json" : `LiteRP_${localTimeStr}.json`;
             
             try {
                 const listRes = await fetch(`https://api.github.com/repos/${sysConfig.ghUser}/${sysConfig.ghRepo}/contents?t=${Date.now()}`, { 
