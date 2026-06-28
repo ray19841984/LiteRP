@@ -264,7 +264,7 @@
         async function fetchAIResponse() {
             let dynamicPrompt = `你現在負責處理一個角色扮演劇本。請完全沉浸在劇情中，用語氣和動作(用括號表示)推動故事，不要承認自己是AI。
 
-            【系統強制寫作規範】：AI 每次的回應字數嚴格要求在 2000 至 2500 字元以上。請極度詳細地描寫場景、環境氛圍、角色的細微表情、內心掙扎、動作細節與對白。不可敷衍跳過劇情，請展開細節鋪陳。\n\n`;
+            【系統強制寫作規範】：AI 每次的回應字數嚴格要求在 2500 至 3000 字元以上。請極度詳細地描寫場景、環境氛圍、角色的細微表情、內心掙扎、動作細節與對白。不可敷衍跳過劇情，請展開細節鋪陳。\n\n`;
             const pinned = document.getElementById('pinnedMemo').value;
             if(pinned) dynamicPrompt += `【📌 絕對主線目標與規則】：\n${pinned}\n\n`;
             dynamicPrompt += `【當前出場的主角陣容】：\n`;
